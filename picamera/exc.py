@@ -1,0 +1,2 @@
+class PiCameraValueError(Exception):
+    pass
