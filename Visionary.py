@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import imutils
 
 fourcc = cv2.VideoWriter_fourcc(*'XVID')
 kernel = np.ones((5, 5), np.uint8)
@@ -154,45 +155,62 @@ def cv2_plot(line, (h, w)):
     return plot
 
 
-ds = 0
-
-
-def find_markers(img):
-    global ds
-    h, w, _ = img.shape
-    img = img[200:, 100:w - 100]
-    cv2.imshow('ZI', img)
-    cv2.imwrite('img' + str(ds) + '.jpeg', img)
-    ds += 1
-    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+def find_markers(roi):
+    h, w, _ = roi.shape
+    median_color = np.median(np.median(roi[w / 4:3 * w / 4, h / 4:2 * h / 4], axis=1), axis=0)
     colors = ['Blue', 'Green', 'Red']
-    s_low, s_high = 1 * 255 / 2, 255
-    v_low, v_high = 2 * 255 / 5, 255
-    h_low, h_high = [60, 0, 120], [120, 60, 180]
-    shape, color, count = None, None, 0
-
-    for i in range(3):
-        mask = cv2.inRange(hsv, (h_low[i], s_low, v_low), (h_high[i], s_high, v_high))
-        mask = cv2.erode(mask, kernel, iterations=1)
-        mask = cv2.medianBlur(mask, 5)
-        _, contours, _ = cv2.findContours(np.copy(mask), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-        # cv2.drawContours(mask, contours, 0, 200, 2)
-        # cv2.waitKey(0)
-        for contour in contours:
-            poly_coord = cv2.approxPolyDP(contour, 0.05 * cv2.arcLength(contour, True), True)
+    color_i = median_color.argmax()
+    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+    hsv[:, :, 0] = (hsv[:, :, 0] + 30) % 180
+    min_area, max_area = 500, 15000
+    s_low, s_high = 2 * 255 / 5, 255
+    v_low, v_high = 255 / 5, 255
+    h_low, h_high = [120, 60, 0], [180, 120, 60]
+    mask = cv2.inRange(hsv, (h_low[color_i], s_low, v_low), (h_high[color_i], s_high, v_high))
+    mask = cv2.erode(mask, np.ones((5, 5)), iterations=2)
+    # mask = cv2.medianBlur(mask, 5)
+    _, contours, _ = cv2.findContours(np.copy(mask), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    shape = None
+    for contour in contours:
+        if min_area < cv2.contourArea(contour) < max_area:
+            poly_coord = cv2.approxPolyDP(contour, 0.03 * cv2.arcLength(contour, True), True)
             n_vertices = len(poly_coord)
-            if n_vertices is None or n_vertices < 3:
-                shape = None
-            elif n_vertices == 3:
+            if n_vertices == 3:
                 shape = 'Triangle'
             elif n_vertices == 4:
                 shape = 'Square'
             else:
                 shape = 'Circle'
-            count += 1
-        if len(contours) > 0:
-            return shape, colors[i], count
-    return None, None, None
+    return colors[color_i], shape
+
+
+def process_markers(img):
+    hi, wi, _ = img.shape
+    blur = cv2.medianBlur(img, 31)
+    edge = imutils.auto_canny(blur)
+    edge = cv2.dilate(edge, np.ones((5, 5)), iterations=2)
+    _, contours, hierarchy = cv2.findContours(np.copy(edge), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    img_tmp = np.copy(img)
+    cv2.drawContours(img_tmp, contours, -1, (100, 0, 0), 2)
+    cv2.drawContours(edge, contours, -1, 100, 2)
+    cnt = 0
+    roi_ptr = []
+    padding = 10
+    for i in range(len(hierarchy[0])):
+        if hierarchy[0][i][3] == -1:
+            x, y, w, h = cv2.boundingRect(contours[i])
+            if 2500 < w * h < 5e4 and h < 200 and w < 200:
+                roi_ptr.append(
+                    (max(x - padding, 0), max(0, y - padding), min(w + 2 * padding, wi), min(hi, h + 2 * padding)))
+                cnt += 1
+                cv2.rectangle(img_tmp, (x - padding, y - padding), (x + w + padding, y + w + padding), (0, 0, 255), 2)
+    # for x, y, w, h in roi_ptr:
+    #     print find_markers(img[y:y + w, x:x + w])
+    if len(roi_ptr) == 0:
+        return None, None, None
+    x, y, w, h = roi_ptr[0]
+    color, shape = find_markers(img[y:y + w, x:x + w])
+    return color, shape, len(roi_ptr)
 
 
 def attach():

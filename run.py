@@ -64,7 +64,7 @@ def main():
                     #    Bot.move(*((20, -20) if val < -10 else (-20, 20)))
                     # Bot.move(0, 0)
                     good_view = Bot.get_good_view()
-                    shape, color, count = CompVision.find_markers(good_view)
+                    shape, color, count = CompVision.process_markers(good_view)
                     print good_view.shape
                     if shape is None or color is None or count is None:
                         print 'False ZI'
